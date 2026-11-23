@@ -4,7 +4,7 @@ Daily Capital Bikeshare counts, 2011-2012. We forecast `cnt` (total daily
 rides) from calendar, weather, and lagged-demand features.
 
 ## Commands
-- `make data` - download raw CSV and assert its shape
+- `make data` - download raw CSV, check its SHA-256, assert its shape
 - `make features` - build `data/processed/features.parquet`
 - `make train` - fit models, write `reports/metrics.json`
 - `make test` - pytest; run this before claiming anything works
@@ -20,9 +20,22 @@ rides) from calendar, weather, and lagged-demand features.
 - Any new lag or rolling feature must be built on a gap-free calendar
   index (`src.features.reindex_to_calendar`) and must `.shift(1)` before
   it aggregates. Add a test for it in `tests/test_leakage.py`.
+- `LAG_WARMUP` is the *longest* window (now 28, for `cnt_roll_28`). Write
+  every other window length as a literal; never derive one from it.
+- A new raw column must be classified in `src/config.py` (a FORBIDDEN set
+  with its reason, or a feature) or `test_every_raw_column_is_classified`
+  fails. Do not silence it by widening the test.
+- `data/raw/` is immutable by any route, Bash included. `load_raw` checks
+  `RAW_SHA256`; if it fails, `git checkout -- data/raw/`, never re-hash.
 - Report the mean baseline **and** the persistence baseline (yesterday's
   count) alongside every model. A negative R^2 is a finding, not a bug
   to hide.
+
+## Agent tooling
+- `/new-feature` adds a predictor test-first; `/seed-fault <fault>` breaks
+  the pipeline on purpose and logs evidence to `docs/SEEDED_FAULTS.md`.
+- `reports/metrics.json` is always the untransformed pipeline.
+  `--target-transform diff28` (Exercise 4) writes `metrics_diff28.json`.
 
 ## Style
 - Standard library, pandas, scikit-learn only. No new dependencies
