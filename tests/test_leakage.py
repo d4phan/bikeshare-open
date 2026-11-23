@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from src.config import FORBIDDEN, TARGET
-from src.features import build_features, feature_columns
+from src.features import build_features, encode_weather, feature_columns
 from src.ingest import load_raw
 
 
@@ -68,6 +68,14 @@ def test_roll_28_is_mean_of_28_strictly_earlier_days(feats):
     expected = raw.loc[window].sum() / 28
     got = feats.set_index("dteday").loc[date, "cnt_roll_28"]
     assert got == pytest.approx(expected)
+
+
+def test_weather_encoder_rejects_unseen_labels():
+    """An unseen label must raise, not become a NaN that dropna() later
+    deletes without comment. The real data only has known labels, so
+    without this test nothing exercises the raise."""
+    with pytest.raises(ValueError, match="unmapped weather labels"):
+        encode_weather(pd.Series(["GOOD", "SNOW", "MISTY"]))
 
 
 def test_no_missing_values(feats):
