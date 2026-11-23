@@ -75,7 +75,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Window lengths are literal: LAG_WARMUP is the *longest* window, so
     # tying these to it would silently stretch them when it grows.
     out["cnt_lag_7"] = out[TARGET].shift(7)
-    out["cnt_roll_7"] = out[TARGET].rolling(7).mean()
+    out["cnt_roll_7"] = out[TARGET].shift(1).rolling(7).mean()
     # Four-week demand level, known at prediction time for date d because
     # every input is from d-28 .. d-1. Sets LAG_WARMUP = 28.
     out["cnt_roll_28"] = out[TARGET].shift(1).rolling(28).mean()
