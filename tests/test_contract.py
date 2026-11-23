@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 from sklearn.metrics import r2_score
 
-from src.config import LAG_WARMUP, TARGET
+from src.config import FORBIDDEN, LAG_WARMUP, RAW, TARGET
 from src.features import build_features, feature_columns, reindex_to_calendar
 from src.ingest import load_raw
 from src.train import MODELS, temporal_split
@@ -41,6 +41,17 @@ def test_only_expected_rows_are_dropped(raw, feats):
     allowed_loss = LAG_WARMUP + LAG_WARMUP * missing_days
     lost = len(raw) - len(feats)
     assert lost <= allowed_loss, f"lost {lost} rows; expected at most {allowed_loss}"
+
+
+def test_every_raw_column_is_classified(feats):
+    """No column may enter silently. Every column in the raw CSV must be
+    in FORBIDDEN (with a reason in src/config.py), be a model feature, or
+    be the date key. A new upstream column fails here until someone
+    decides which it is."""
+    header = pd.read_csv(RAW, nrows=0).columns
+    classified = FORBIDDEN | set(feature_columns(feats)) | {"dteday"}
+    unclassified = sorted(set(header) - classified)
+    assert not unclassified, f"unclassified raw columns: {unclassified}"
 
 
 def test_beats_the_mean_baseline(feats):
