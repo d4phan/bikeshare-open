@@ -42,8 +42,17 @@ TIME_INDEX_COLS = {"instant", "yr", "days_since_2011"}
 #    build our own lags from the target and test those instead.
 UNVERIFIED_COLS = {"cnt_2d_bfr"}
 
+# 4. Raw labels: string columns the model never sees as-is. Each is either
+#    re-encoded in build_features (holiday -> is_holiday, workday ->
+#    is_workday, weather -> weather_severity, with a loud failure on unseen
+#    labels) or duplicates a calendar feature derived from dteday (mnth ->
+#    month_sin/cos, weekday -> dayofweek, season ~ month). Listing them
+#    here means tests/test_contract.py can tell them apart from a column
+#    that arrived unannounced.
+RAW_LABEL_COLS = {"season", "mnth", "holiday", "weekday", "workday", "weather"}
+
 # What feature_columns() and the tests actually enforce.
-FORBIDDEN = LEAKAGE_COLS | TIME_INDEX_COLS | UNVERIFIED_COLS
+FORBIDDEN = LEAKAGE_COLS | TIME_INDEX_COLS | UNVERIFIED_COLS | RAW_LABEL_COLS
 
 # Temporal split: train on 2011, validate on H1 2012, test on H2 2012.
 TRAIN_END = "2011-12-31"
