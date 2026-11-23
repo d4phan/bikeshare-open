@@ -57,6 +57,19 @@ def test_rolling_mean_excludes_today(feats):
         assert feats.set_index("dteday").cnt_roll_7[date] == pytest.approx(expected)
 
 
+def test_roll_28_is_mean_of_28_strictly_earlier_days(feats):
+    """cnt_roll_28 on 2012-03-15 must equal the mean of cnt over the 28
+    calendar days 2012-02-16 .. 2012-03-14, computed by hand from the raw
+    table. Today's count (2012-03-15) must not be in the window."""
+    raw = load_raw().set_index("dteday")[TARGET]
+    date = pd.Timestamp("2012-03-15")
+    window = pd.date_range(date - pd.Timedelta(days=28), date - pd.Timedelta(days=1))
+    assert len(window) == 28 and window.max() < date
+    expected = raw.loc[window].sum() / 28
+    got = feats.set_index("dteday").loc[date, "cnt_roll_28"]
+    assert got == pytest.approx(expected)
+
+
 def test_no_missing_values(feats):
     assert feats[feature_columns(feats)].isna().sum().sum() == 0
 
