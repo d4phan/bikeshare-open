@@ -8,7 +8,8 @@ rides) from calendar, weather, and lagged-demand features.
 - `make features` - build `data/processed/features.parquet`
 - `make train` - fit models, write `reports/metrics.json`
 - `make test` - pytest; run this before claiming anything works
-- `make all` - the three pipeline stages in order
+- `make all` - the three pipeline stages in order; reproduces every number
+  in REPORT.md (headline: ridge test R^2 in `reports/metrics.json`)
 
 ## Non-negotiable rules
 - **Never** put `casual` or `registered` in a feature set:

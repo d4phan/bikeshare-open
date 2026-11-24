@@ -10,6 +10,42 @@ Claude Code's hook runner. The script, payload and exit code are exactly what Cl
 
 "Agent turns to fix" counts the agent edits between the red run and the next green `make test`.
 
+## Exercise 1: the feature test, red before the feature existed
+
+`test_roll_28_is_mean_of_28_strictly_earlier_days` was committed before `cnt_roll_28` was built
+(commit `Add failing test for cnt_roll_28`). `make test` at that commit:
+
+```text
+        >>> monotonic_index = pd.Index(list("abbc"))
+        >>> monotonic_index.get_loc("b")
+        slice(1, 3, None)
+    
+        >>> non_monotonic_index = pd.Index(list("abcb"))
+        >>> non_monotonic_index.get_loc("b")
+        array([False,  True, False,  True])
+        """
+        casted_key = self._maybe_cast_indexer(key)
+        try:
+            return self._engine.get_loc(casted_key)
+        except KeyError as err:
+            if isinstance(casted_key, slice) or (
+                isinstance(casted_key, abc.Iterable)
+                and any(isinstance(x, slice) for x in casted_key)
+            ):
+                raise InvalidIndexError(key) from err
+>           raise KeyError(key) from err
+E           KeyError: 'cnt_roll_28'
+
+.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3648: KeyError
+=========================== short test summary info ============================
+FAILED tests/test_leakage.py::test_roll_28_is_mean_of_28_strictly_earlier_days
+1 failed, 14 passed in 1.42s
+make: *** [Makefile:16: test] Error 1
+```
+
+It fails for the right reason: the column does not exist yet. The next commit adds the feature, and
+the test passes.
+
 ## Fault 1: forbidden column added to `feature_columns`
 
 Change:
