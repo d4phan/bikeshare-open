@@ -354,7 +354,7 @@ something runs `chmod`. A hash check sees the bytes, however they got there.
 
 **Implemented:** `RAW_SHA256` in `src/config.py`, and `src.ingest.verify_raw()` is called first in
 `load_raw()`. Because every stage and every test fixture loads data through `load_raw()`, this
-covers `make data`, `make all` and `make test` together. Replaying the same `cp` with the guard in place (re-run on the final 18-test suite):
+covers `make data`, `make all` and `make test` together. Replaying the same `cp` with the guard in place (re-run on the final 20-test suite):
 
 ```text
 $ cp /tmp/bike_daily_cleaned.csv data/raw/bike_daily.csv
@@ -365,7 +365,7 @@ make: *** [Makefile:7: data] Error 1
 $ make test
 ERROR tests/test_split.py::test_splits_are_ordered_in_time - ValueError: bike...
 ERROR tests/test_split.py::test_no_overlapping_dates - ValueError: bike_daily...
-2 passed, 16 errors in 1.20s
+2 passed, 18 errors in 1.15s
 make: *** [Makefile:16: test] Error 1
 $ git checkout -- data/raw/ && make data
 OK ingest: 728 rows, 2011-01-03 -> 2012-12-31
@@ -442,7 +442,7 @@ index 6654075..009154e 100644
 ## Re-run against the final suite
 
 The outputs above are what the suite printed when each fault was seeded, so their test counts are
-those of that commit. Below, the same faults are re-seeded on the final code (18 tests), so the pasted
+those of that commit. Below, the same faults are re-seeded on the final code (20 tests), so the pasted
 output matches what the tests print now. Each was reverted with `git checkout -- src/features.py`.
 
 ### Fault 1: forbidden `casual` in `feature_columns`
@@ -470,7 +470,7 @@ index 156c919..ca89ac4 100644
 
 ```text
 python -m pytest tests/ -q
-..F...FF..........                                                       [100%]
+..F...FF............                                                     [100%]
 =================================== FAILURES ===================================
 _____________________ test_every_raw_column_is_classified ______________________
 
@@ -551,7 +551,7 @@ tests/test_leakage.py:45: AssertionError
 FAILED tests/test_contract.py::test_every_raw_column_is_classified - Assertio...
 FAILED tests/test_leakage.py::test_no_forbidden_features - AssertionError: fo...
 FAILED tests/test_leakage.py::test_no_feature_restates_same_day_leakage - Ass...
-3 failed, 15 passed in 1.30s
+3 failed, 17 passed in 1.36s
 make: *** [Makefile:16: test] Error 1
 make test exit: 2
 ```
@@ -581,7 +581,7 @@ tests/test_leakage.py:45: AssertionError
 =========================== short test summary info ============================
 FAILED tests/test_leakage.py::test_no_forbidden_features - AssertionError: fo...
 FAILED tests/test_leakage.py::test_no_feature_restates_same_day_leakage - Ass...
-2 failed, 8 passed in 0.39s
+2 failed, 10 passed in 0.41s
 ```
 
 ### Fault 2: `.shift(1)` removed from `cnt_roll_7`
@@ -606,7 +606,7 @@ index 156c919..35fc12f 100644
 
 ```text
 python -m pytest tests/ -q
-..........F.......                                                       [100%]
+..........F.........                                                     [100%]
 =================================== FAILURES ===================================
 _______________________ test_rolling_mean_excludes_today _______________________
 
@@ -633,7 +633,7 @@ E             Expected: 4724.428571428572 ± 0.00472443
 tests/test_leakage.py:76: AssertionError
 =========================== short test summary info ============================
 FAILED tests/test_leakage.py::test_rolling_mean_excludes_today - assert np.fl...
-1 failed, 17 passed in 1.31s
+1 failed, 19 passed in 1.23s
 make: *** [Makefile:16: test] Error 1
 make test exit: 2
 ```
@@ -663,7 +663,7 @@ E             Expected: 4724.428571428572 ± 0.00472443
 tests/test_leakage.py:76: AssertionError
 =========================== short test summary info ============================
 FAILED tests/test_leakage.py::test_rolling_mean_excludes_today - assert np.fl...
-1 failed, 9 passed in 0.39s
+1 failed, 11 passed in 0.41s
 ```
 
 ### Fault 3: `raise` removed from `encode_weather`
@@ -690,7 +690,7 @@ index 156c919..5538e32 100644
 
 ```text
 python -m pytest tests/ -q
-............F.....                                                       [100%]
+..............F.....                                                     [100%]
 =================================== FAILURES ===================================
 __________________ test_weather_encoder_rejects_unseen_labels __________________
 
@@ -702,10 +702,10 @@ __________________ test_weather_encoder_rejects_unseen_labels __________________
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 E       Failed: DID NOT RAISE ValueError
 
-tests/test_leakage.py:96: Failed
+tests/test_leakage.py:125: Failed
 =========================== short test summary info ============================
 FAILED tests/test_leakage.py::test_weather_encoder_rejects_unseen_labels - Fa...
-1 failed, 17 passed in 1.31s
+1 failed, 19 passed in 1.19s
 make: *** [Makefile:16: test] Error 1
 make test exit: 2
 ```
@@ -716,7 +716,7 @@ Hook stderr:
 hook exit code: 2
 --- hook stderr ---
 Leakage tests failed after editing /home/claude/work/bikeshare-open/src/features.py:
-.......F..                                                               [100%]
+.........F..                                                             [100%]
 =================================== FAILURES ===================================
 __________________ test_weather_encoder_rejects_unseen_labels __________________
 
@@ -728,16 +728,16 @@ __________________ test_weather_encoder_rejects_unseen_labels __________________
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 E       Failed: DID NOT RAISE ValueError
 
-tests/test_leakage.py:96: Failed
+tests/test_leakage.py:125: Failed
 =========================== short test summary info ============================
 FAILED tests/test_leakage.py::test_weather_encoder_rejects_unseen_labels - Fa...
-1 failed, 9 passed in 0.34s
+1 failed, 11 passed in 0.41s
 ```
 
 ### Extra: a leaked column renamed to something innocent, in code
 
 `riders = casual` added in `build_features`. Before `test_no_feature_restates_same_day_leakage`
-existed, this passed all 17 tests, because `test_no_forbidden_features` only checks names.
+existed, this passed every test, because `test_no_forbidden_features` only checks names.
 
 ```diff
 diff --git a/src/features.py b/src/features.py
@@ -758,7 +758,7 @@ index 156c919..4a81fb5 100644
 
 ```text
 python -m pytest tests/ -q
-.......F..........                                                       [100%]
+.......F............                                                     [100%]
 =================================== FAILURES ===================================
 __________________ test_no_feature_restates_same_day_leakage ___________________
 
@@ -787,7 +787,7 @@ E            +    where all = temp                0.504360\natemp               
 tests/test_leakage.py:45: AssertionError
 =========================== short test summary info ============================
 FAILED tests/test_leakage.py::test_no_feature_restates_same_day_leakage - Ass...
-1 failed, 17 passed in 1.27s
+1 failed, 19 passed in 1.29s
 make: *** [Makefile:16: test] Error 1
 make test exit: 2
 ```
@@ -817,6 +817,6 @@ E            +    where all = temp                0.504360\natemp               
 tests/test_leakage.py:45: AssertionError
 =========================== short test summary info ============================
 FAILED tests/test_leakage.py::test_no_feature_restates_same_day_leakage - Ass...
-1 failed, 9 passed in 0.38s
+1 failed, 11 passed in 0.36s
 ```
 
