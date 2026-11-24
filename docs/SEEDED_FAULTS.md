@@ -373,3 +373,273 @@ OK ingest: 728 rows, 2011-01-03 -> 2012-12-31
 
 `.gitattributes` marks `data/raw/*.csv` as binary (`-text`) so a Windows checkout with
 `core.autocrlf` cannot rewrite line endings and trip the hash on an honest clone.
+
+## Re-run against the final suite
+
+The outputs above are what the suite printed at the time of each fault, so the test counts are those of
+that commit. Here are the three faults re-seeded on the final code (HEAD, 17 tests), so the pasted output
+matches what the tests print now. Each was reverted with `git checkout -- src/features.py`.
+
+### Fault 1: forbidden `casual` in `feature_columns`
+
+Now **2** tests go red. The strengthened contract test also catches it, because the raw columns the
+model uses no longer match the declared set.
+
+```diff
+diff --git a/src/features.py b/src/features.py
+index 156c919..ca89ac4 100644
+--- a/src/features.py
++++ b/src/features.py
+@@ -86,7 +86,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
+ def feature_columns(df: pd.DataFrame) -> list[str]:
+     """Numeric columns that are safe to feed the model."""
+     numeric = df.select_dtypes(include="number").columns
+-    return [c for c in numeric if c not in FORBIDDEN]
++    return [c for c in numeric if c not in FORBIDDEN] + ["casual"]
+ 
+ 
+ if __name__ == "__main__":
+```
+
+`make test`:
+
+```text
+python -m pytest tests/ -q
+..F...F..........                                                        [100%]
+=================================== FAILURES ===================================
+_____________________ test_every_raw_column_is_classified ______________________
+
+feats =         dteday  instant  season  ...  cnt_lag_7   cnt_roll_7  cnt_roll_28
+0   2011-01-31     31.0  WINTER  ...     141....142857  4071.321429
+671 2012-12-31    731.0  WINTER  ...      920.0  1531.428571  3969.428571
+
+[672 rows x 29 columns]
+
+    def test_every_raw_column_is_classified(feats):
+        """No column may enter silently. Every column in the raw CSV must be
+        in FORBIDDEN (with a reason in src/config.py), be a declared raw
+        feature (RAW_FEATURE_COLS), or be the date key. The declared set is
+        hand-written on purpose: classifying against feature_columns() would
+        pass any new numeric column, because that function admits it."""
+        header = set(pd.read_csv(RAW, nrows=0).columns)
+        classified = FORBIDDEN | RAW_FEATURE_COLS | {"dteday"}
+        unclassified = sorted(header - classified)
+        assert not unclassified, f"unclassified raw columns: {unclassified}"
+        # The declarations must match what the model actually uses.
+        used_raw = header & set(feature_columns(feats))
+>       assert used_raw == RAW_FEATURE_COLS, (
+            f"raw features used {sorted(used_raw)} != declared {sorted(RAW_FEATURE_COLS)}"
+        )
+E       AssertionError: raw features used ['atemp', 'casual', 'hum', 'temp', 'windspeed'] != declared ['atemp', 'hum', 'temp', 'windspeed']
+E       assert {'atemp', 'ca..., 'windspeed'} == {'atemp', 'hu..., 'windspeed'}
+E         
+E         Extra items in the left set:
+E         'casual'
+E         Use -v to get more diff
+
+tests/test_contract.py:58: AssertionError
+__________________________ test_no_forbidden_features __________________________
+
+feats =         dteday  instant  season  ...  cnt_lag_7   cnt_roll_7  cnt_roll_28
+0   2011-01-31     31.0  WINTER  ...     141....142857  4071.321429
+671 2012-12-31    731.0  WINTER  ...      920.0  1531.428571  3969.428571
+
+[672 rows x 29 columns]
+
+    def test_no_forbidden_features(feats):
+        """Guards the gate, not the data: feature_columns() excludes FORBIDDEN by
+        construction, so this cannot discover a *new* leaky column. What it
+        catches is someone editing feature_columns() or FORBIDDEN -- which is
+        exactly the fault the Step 7 hook demonstrates."""
+        cols = set(feature_columns(feats))
+>       assert not (cols & FORBIDDEN), f"forbidden columns in feature set: {cols & FORBIDDEN}"
+E       AssertionError: forbidden columns in feature set: {'casual'}
+E       assert not ({'atemp', 'casual', 'cnt_lag_1', 'cnt_lag_7', 'cnt_roll_28', 'cnt_roll_7', ...} & {'casual', 'cnt', 'cnt_2d_bfr', 'days_since_2011', 'holiday', 'instant', ...})
+
+tests/test_leakage.py:31: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_contract.py::test_every_raw_column_is_classified - Assertio...
+FAILED tests/test_leakage.py::test_no_forbidden_features - AssertionError: fo...
+2 failed, 15 passed in 1.34s
+make: *** [Makefile:16: test] Error 1
+make test exit: 2
+```
+
+Hook stderr:
+
+```text
+hook exit code: 2
+--- hook stderr ---
+Leakage tests failed after editing /home/claude/work/bikeshare-open/src/features.py:
+feats =         dteday  instant  season  ...  cnt_lag_7   cnt_roll_7  cnt_roll_28
+0   2011-01-31     31.0  WINTER  ...     141....142857  4071.321429
+671 2012-12-31    731.0  WINTER  ...      920.0  1531.428571  3969.428571
+
+[672 rows x 29 columns]
+
+    def test_no_forbidden_features(feats):
+        """Guards the gate, not the data: feature_columns() excludes FORBIDDEN by
+        construction, so this cannot discover a *new* leaky column. What it
+        catches is someone editing feature_columns() or FORBIDDEN -- which is
+        exactly the fault the Step 7 hook demonstrates."""
+        cols = set(feature_columns(feats))
+>       assert not (cols & FORBIDDEN), f"forbidden columns in feature set: {cols & FORBIDDEN}"
+E       AssertionError: forbidden columns in feature set: {'casual'}
+E       assert not ({'atemp', 'casual', 'cnt_lag_1', 'cnt_lag_7', 'cnt_roll_28', 'cnt_roll_7', ...} & {'casual', 'cnt', 'cnt_2d_bfr', 'days_since_2011', 'holiday', 'instant', ...})
+
+tests/test_leakage.py:31: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_leakage.py::test_no_forbidden_features - AssertionError: fo...
+1 failed, 8 passed in 0.38s
+```
+
+### Fault 2: `.shift(1)` removed from `cnt_roll_7`
+
+```diff
+diff --git a/src/features.py b/src/features.py
+index 156c919..35fc12f 100644
+--- a/src/features.py
++++ b/src/features.py
+@@ -75,7 +75,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
+     # Window lengths are literal: LAG_WARMUP is the *longest* window, so
+     # tying these to it would silently stretch them when it grows.
+     out["cnt_lag_7"] = out[TARGET].shift(7)
+-    out["cnt_roll_7"] = out[TARGET].shift(1).rolling(7).mean()
++    out["cnt_roll_7"] = out[TARGET].rolling(7).mean()
+     # Four-week demand level, known at prediction time for date d because
+     # every input is from d-28 .. d-1. Sets LAG_WARMUP = 28.
+     out["cnt_roll_28"] = out[TARGET].shift(1).rolling(28).mean()
+```
+
+`make test`:
+
+```text
+python -m pytest tests/ -q
+.........F.......                                                        [100%]
+=================================== FAILURES ===================================
+_______________________ test_rolling_mean_excludes_today _______________________
+
+feats =         dteday  instant  season  ...  cnt_lag_7   cnt_roll_7  cnt_roll_28
+0   2011-01-31     31.0  WINTER  ...     141....428571  4071.321429
+671 2012-12-31    731.0  WINTER  ...      920.0  1789.857143  3969.428571
+
+[672 rows x 29 columns]
+
+    def test_rolling_mean_excludes_today(feats):
+        """cnt_roll_7 must be the mean of the 7 calendar days *before* today."""
+        by_date = feats.set_index("dteday")[TARGET]
+        date = feats.dteday.iloc[200]
+        window = [date - pd.Timedelta(days=k) for k in range(1, 8)]
+        if all(d in by_date.index for d in window):
+            expected = sum(by_date[d] for d in window) / 7
+>           assert feats.set_index("dteday").cnt_roll_7[date] == pytest.approx(expected)
+E           assert np.float64(4605.285714285715) == 4724.428571428572 ± 0.00472443
+E             
+E             comparison failed
+E             Obtained: 4605.285714285715
+E             Expected: 4724.428571428572 ± 0.00472443
+
+tests/test_leakage.py:57: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_leakage.py::test_rolling_mean_excludes_today - assert np.fl...
+1 failed, 16 passed in 1.33s
+make: *** [Makefile:16: test] Error 1
+make test exit: 2
+```
+
+Hook stderr:
+
+```text
+hook exit code: 2
+--- hook stderr ---
+Leakage tests failed after editing /home/claude/work/bikeshare-open/src/features.py:
+[672 rows x 29 columns]
+
+    def test_rolling_mean_excludes_today(feats):
+        """cnt_roll_7 must be the mean of the 7 calendar days *before* today."""
+        by_date = feats.set_index("dteday")[TARGET]
+        date = feats.dteday.iloc[200]
+        window = [date - pd.Timedelta(days=k) for k in range(1, 8)]
+        if all(d in by_date.index for d in window):
+            expected = sum(by_date[d] for d in window) / 7
+>           assert feats.set_index("dteday").cnt_roll_7[date] == pytest.approx(expected)
+E           assert np.float64(4605.285714285715) == 4724.428571428572 ± 0.00472443
+E             
+E             comparison failed
+E             Obtained: 4605.285714285715
+E             Expected: 4724.428571428572 ± 0.00472443
+
+tests/test_leakage.py:57: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_leakage.py::test_rolling_mean_excludes_today - assert np.fl...
+1 failed, 8 passed in 0.39s
+```
+
+### Fault 3: `raise` removed from `encode_weather`
+
+Now caught by `test_weather_encoder_rejects_unseen_labels`.
+
+```diff
+diff --git a/src/features.py b/src/features.py
+index 156c919..5538e32 100644
+--- a/src/features.py
++++ b/src/features.py
+@@ -27,7 +27,7 @@ def encode_weather(series: pd.Series) -> pd.Series:
+     known = series.dropna()
+     unknown = set(known.unique()) - set(WEATHER_ORDER)
+     if unknown:
+-        raise ValueError(f"unmapped weather labels: {sorted(unknown)}")
++        pass
+     return series.map(WEATHER_ORDER).astype(float)
+ 
+ 
+```
+
+`make test`:
+
+```text
+python -m pytest tests/ -q
+...........F.....                                                        [100%]
+=================================== FAILURES ===================================
+__________________ test_weather_encoder_rejects_unseen_labels __________________
+
+    def test_weather_encoder_rejects_unseen_labels():
+        """An unseen label must raise, not become a NaN that dropna() later
+        deletes without comment. The real data only has known labels, so
+        without this test nothing exercises the raise."""
+>       with pytest.raises(ValueError, match="unmapped weather labels"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests/test_leakage.py:77: Failed
+=========================== short test summary info ============================
+FAILED tests/test_leakage.py::test_weather_encoder_rejects_unseen_labels - Fa...
+1 failed, 16 passed in 1.14s
+make: *** [Makefile:16: test] Error 1
+make test exit: 2
+```
+
+Hook stderr:
+
+```text
+hook exit code: 2
+--- hook stderr ---
+Leakage tests failed after editing /home/claude/work/bikeshare-open/src/features.py:
+......F..                                                                [100%]
+=================================== FAILURES ===================================
+__________________ test_weather_encoder_rejects_unseen_labels __________________
+
+    def test_weather_encoder_rejects_unseen_labels():
+        """An unseen label must raise, not become a NaN that dropna() later
+        deletes without comment. The real data only has known labels, so
+        without this test nothing exercises the raise."""
+>       with pytest.raises(ValueError, match="unmapped weather labels"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests/test_leakage.py:77: Failed
+=========================== short test summary info ============================
+FAILED tests/test_leakage.py::test_weather_encoder_rejects_unseen_labels - Fa...
+1 failed, 8 passed in 0.35s
+```
+
