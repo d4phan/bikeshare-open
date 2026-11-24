@@ -1,17 +1,14 @@
 ---
 name: seed-fault
 description: Deliberately break the pipeline in one named way, prove the tests and the leakage hook catch it, then fix it and log the evidence. Use for "seed a fault", "break X on purpose", or checking whether a guard actually fires.
-allowed-tools: Read, Edit, Bash(git diff*), Bash(git status), Bash(git commit*), Bash(git checkout*), Bash(make*), Bash(python -m pytest*)
+allowed-tools: Read, Edit, Bash(git diff*), Bash(git status*), Bash(git commit*), Bash(git checkout*), Bash(make*), Bash(python -m pytest*)
 ---
 
 # Fault to seed: $ARGUMENTS
 
-Current state (must be clean and green before you start):
-
-!`git status --short; python -m pytest tests/ -q 2>&1 | tail -1`
-
-If the tree is dirty or any test is red, stop and say so. A fault seeded
-on top of a red suite proves nothing.
+0. **Check the starting state.** Run `git status --short` and `make test`.
+   If the tree is dirty or any test is red, stop and say so. A fault
+   seeded on top of a red suite proves nothing.
 
 1. **Make exactly one change** that introduces the fault in
    "$ARGUMENTS". Use Edit, not Bash, so the PostToolUse hook runs. Show
