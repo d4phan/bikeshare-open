@@ -89,6 +89,35 @@ def test_roll_28_is_mean_of_28_strictly_earlier_days(feats):
     assert got == pytest.approx(expected)
 
 
+def test_lag_7_is_a_true_7_day_calendar_lag(feats):
+    """cnt_lag_7 on date d must equal cnt on d-7 in calendar days, on every
+    date. Guards the trap where a lag length is derived from LAG_WARMUP and
+    silently stretches when a longer feature raises it."""
+    by_date = feats.set_index("dteday")[TARGET]
+    raw = load_raw().set_index("dteday")[TARGET]
+    lag7 = feats.set_index("dteday")["cnt_lag_7"]
+    expected = raw.reindex(lag7.index - pd.Timedelta(days=7)).to_numpy()
+    assert lag7.to_numpy() == pytest.approx(expected)
+    assert not (lag7 == by_date).all()
+
+
+def test_roll_28_uses_calendar_days_around_the_gap(feats):
+    """2011-03-10 is missing. A row-based rolling window would quietly give
+    2011-03-11 .. 2011-04-07 a 28-row mean that spans 29 calendar days. On a
+    gap-free calendar those days have no complete window and must be
+    dropped; the first kept day after the gap is 2011-04-08, whose window is
+    2011-03-11 .. 2011-04-07, all present."""
+    raw = load_raw().set_index("dteday")[TARGET]
+    roll = feats.set_index("dteday")["cnt_roll_28"]
+    gap = pd.Timestamp("2011-03-10")
+    assert gap not in raw.index
+    affected = pd.date_range(gap + pd.Timedelta(days=1), gap + pd.Timedelta(days=28))
+    assert not roll.index.isin(affected).any(), "rows whose 28-day window spans the missing day were kept"
+    first = pd.Timestamp("2011-04-08")
+    window = pd.date_range(first - pd.Timedelta(days=28), first - pd.Timedelta(days=1))
+    assert roll[first] == pytest.approx(raw.loc[window].mean())
+
+
 def test_weather_encoder_rejects_unseen_labels():
     """An unseen label must raise, not become a NaN that dropna() later
     deletes without comment. The real data only has known labels, so
