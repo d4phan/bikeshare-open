@@ -56,6 +56,12 @@ UNVERIFIED_COLS = {"cnt_2d_bfr"}
 #    that arrived unannounced.
 RAW_LABEL_COLS = {"season", "mnth", "holiday", "weekday", "workday", "weather"}
 
+# Raw columns the model uses directly as features, declared by hand.
+# tests/test_contract.py classifies raw columns against this set, not
+# against feature_columns(): that function admits any numeric column, so a
+# new numeric upstream column would otherwise classify itself.
+RAW_FEATURE_COLS = {"temp", "atemp", "hum", "windspeed"}
+
 # What feature_columns() and the tests actually enforce.
 FORBIDDEN = LEAKAGE_COLS | TIME_INDEX_COLS | UNVERIFIED_COLS | RAW_LABEL_COLS
 

@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 from sklearn.metrics import r2_score
 
-from src.config import FORBIDDEN, LAG_WARMUP, RAW, TARGET
+from src.config import FORBIDDEN, LAG_WARMUP, RAW, RAW_FEATURE_COLS, TARGET
 from src.features import build_features, feature_columns, reindex_to_calendar
 from src.ingest import load_raw
 from src.train import MODELS, temporal_split
@@ -45,13 +45,19 @@ def test_only_expected_rows_are_dropped(raw, feats):
 
 def test_every_raw_column_is_classified(feats):
     """No column may enter silently. Every column in the raw CSV must be
-    in FORBIDDEN (with a reason in src/config.py), be a model feature, or
-    be the date key. A new upstream column fails here until someone
-    decides which it is."""
-    header = pd.read_csv(RAW, nrows=0).columns
-    classified = FORBIDDEN | set(feature_columns(feats)) | {"dteday"}
-    unclassified = sorted(set(header) - classified)
+    in FORBIDDEN (with a reason in src/config.py), be a declared raw
+    feature (RAW_FEATURE_COLS), or be the date key. The declared set is
+    hand-written on purpose: classifying against feature_columns() would
+    pass any new numeric column, because that function admits it."""
+    header = set(pd.read_csv(RAW, nrows=0).columns)
+    classified = FORBIDDEN | RAW_FEATURE_COLS | {"dteday"}
+    unclassified = sorted(header - classified)
     assert not unclassified, f"unclassified raw columns: {unclassified}"
+    # The declarations must match what the model actually uses.
+    used_raw = header & set(feature_columns(feats))
+    assert used_raw == RAW_FEATURE_COLS, (
+        f"raw features used {sorted(used_raw)} != declared {sorted(RAW_FEATURE_COLS)}"
+    )
 
 
 def test_beats_the_mean_baseline(feats):
