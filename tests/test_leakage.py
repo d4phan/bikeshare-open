@@ -4,10 +4,11 @@ test_no_forbidden_features is the single most valuable test in this repo:
 casual + registered == cnt exactly, so any model handed those columns
 scores R^2 = 1.0 and looks brilliant while having learned nothing.
 """
+import numpy as np
 import pandas as pd
 import pytest
 
-from src.config import FORBIDDEN, TARGET
+from src.config import FORBIDDEN, LEAKAGE_COLS, TARGET
 from src.features import build_features, encode_weather, feature_columns
 from src.ingest import load_raw
 
@@ -29,6 +30,24 @@ def test_no_forbidden_features(feats):
     exactly the fault the Step 7 hook demonstrates."""
     cols = set(feature_columns(feats))
     assert not (cols & FORBIDDEN), f"forbidden columns in feature set: {cols & FORBIDDEN}"
+
+
+def test_no_feature_restates_same_day_leakage(feats):
+    """test_no_forbidden_features checks names, which feature_columns()
+    already guarantees, so a leaked column renamed to something innocent
+    (`riders = casual`) passes it. This checks values: no feature may track
+    a same-day leakage column almost exactly, and the features together
+    must not reproduce cnt exactly. Legitimate features top out near 0.82
+    correlation and a max least-squares residual in the thousands."""
+    X = feats[feature_columns(feats)].astype(float)
+    for col in sorted(LEAKAGE_COLS):
+        corr = X.corrwith(feats[col].astype(float)).abs()
+        assert (corr < 0.99).all(), f"features restating same-day {col}: {corr[corr >= 0.99].round(4).to_dict()}"
+    A = np.column_stack([X.to_numpy(), np.ones(len(X))])
+    y = feats[TARGET].to_numpy(dtype=float)
+    coef, *_ = np.linalg.lstsq(A, y, rcond=None)
+    resid = float(np.abs(A @ coef - y).max())
+    assert resid > 1.0, f"features reproduce {TARGET} exactly (max residual {resid:.2e})"
 
 
 def test_lags_are_true_calendar_lags(feats):
