@@ -371,19 +371,84 @@ $ git checkout -- data/raw/ && make data
 OK ingest: 728 rows, 2011-01-03 -> 2012-12-31
 ```
 
+The catcher's diff (from commit `Seeded fault 4 ... add SHA-256 guard`, `git diff 0e4a2c3 3676597 -- src/config.py src/ingest.py .gitattributes`):
+
+```diff
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..b0d6f8d
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1 @@
++data/raw/*.csv -text
+diff --git a/src/config.py b/src/config.py
+index acdf187..850a85c 100644
+--- a/src/config.py
++++ b/src/config.py
+@@ -20,6 +20,11 @@ DATA_URL = (
+     "interpretable-ml-book/master/data/bike.csv"
+ )
+ 
++# SHA-256 of the checked-in raw file. src.ingest.load_raw refuses any other
++# bytes, so a raw file swapped in by a shell `cp` (which the Edit/Write deny
++# rules and the PostToolUse hook never see) fails `make data` and every test.
++RAW_SHA256 = "a6bed1577f6e4de56dcfae6d8315985073cc0ad3446c8c99ed60c86a0b5ad9dc"
++
+ TARGET = "cnt"
+ 
+ # --- Three reasons a column is kept out of the feature set --------------
+diff --git a/src/ingest.py b/src/ingest.py
+index 6654075..009154e 100644
+--- a/src/ingest.py
++++ b/src/ingest.py
+@@ -2,12 +2,13 @@
+ 
+ Run: python -m src.ingest
+ """
++import hashlib
+ import sys
+ import urllib.request
+ 
+ import pandas as pd
+ 
+-from src.config import DATA_URL, RAW
++from src.config import DATA_URL, RAW, RAW_SHA256
+ 
+ EXPECTED_MIN_ROWS = 700
+ REQUIRED_COLS = {"dteday", "cnt", "casual", "registered", "temp", "hum", "windspeed"}
+@@ -20,7 +21,17 @@ def download(force: bool = False) -> None:
+     urllib.request.urlretrieve(DATA_URL, RAW)
+ 
+ 
++def verify_raw() -> None:
++    digest = hashlib.sha256(RAW.read_bytes()).hexdigest()
++    if digest != RAW_SHA256:
++        raise ValueError(
++            f"{RAW.name} sha256 {digest[:16]}... != expected {RAW_SHA256[:16]}...; "
++            "data/raw is immutable. Restore it with: git checkout -- data/raw/"
++        )
++
++
+ def load_raw() -> pd.DataFrame:
++    verify_raw()
+     df = pd.read_csv(RAW, parse_dates=["dteday"])
+     missing = REQUIRED_COLS - set(df.columns)
+     if missing:
+```
+
 `.gitattributes` marks `data/raw/*.csv` as binary (`-text`) so a Windows checkout with
 `core.autocrlf` cannot rewrite line endings and trip the hash on an honest clone.
 
 ## Re-run against the final suite
 
-The outputs above are what the suite printed at the time of each fault, so the test counts are those of
-that commit. Here are the three faults re-seeded on the final code (HEAD, 17 tests), so the pasted output
-matches what the tests print now. Each was reverted with `git checkout -- src/features.py`.
+The outputs above are what the suite printed when each fault was seeded, so their test counts are
+those of that commit. Below, the same faults are re-seeded on the final code (18 tests), so the pasted
+output matches what the tests print now. Each was reverted with `git checkout -- src/features.py`.
 
 ### Fault 1: forbidden `casual` in `feature_columns`
 
-Now **2** tests go red. The strengthened contract test also catches it, because the raw columns the
-model uses no longer match the declared set.
+Now **3** tests go red: the name check, the contract test (the raw columns the model uses no longer
+match the declared set) and the value-based leakage test.
 
 ```diff
 diff --git a/src/features.py b/src/features.py
@@ -405,7 +470,7 @@ index 156c919..ca89ac4 100644
 
 ```text
 python -m pytest tests/ -q
-..F...F..........                                                        [100%]
+..F...FF..........                                                       [100%]
 =================================== FAILURES ===================================
 _____________________ test_every_raw_column_is_classified ______________________
 
@@ -456,11 +521,37 @@ feats =         dteday  instant  season  ...  cnt_lag_7   cnt_roll_7  cnt_roll_2
 E       AssertionError: forbidden columns in feature set: {'casual'}
 E       assert not ({'atemp', 'casual', 'cnt_lag_1', 'cnt_lag_7', 'cnt_roll_28', 'cnt_roll_7', ...} & {'casual', 'cnt', 'cnt_2d_bfr', 'days_since_2011', 'holiday', 'instant', ...})
 
-tests/test_leakage.py:31: AssertionError
+tests/test_leakage.py:32: AssertionError
+__________________ test_no_feature_restates_same_day_leakage ___________________
+
+feats =         dteday  instant  season  ...  cnt_lag_7   cnt_roll_7  cnt_roll_28
+0   2011-01-31     31.0  WINTER  ...     141....142857  4071.321429
+671 2012-12-31    731.0  WINTER  ...      920.0  1531.428571  3969.428571
+
+[672 rows x 29 columns]
+
+    def test_no_feature_restates_same_day_leakage(feats):
+        """test_no_forbidden_features checks names, which feature_columns()
+        already guarantees, so a leaked column renamed to something innocent
+        (`riders = casual`) passes it. This checks values: no feature may track
+        a same-day leakage column almost exactly, and the features together
+        must not reproduce cnt exactly. Legitimate features top out near 0.82
+        correlation and a max least-squares residual in the thousands."""
+        X = feats[feature_columns(feats)].astype(float)
+        for col in sorted(LEAKAGE_COLS):
+            corr = X.corrwith(feats[col].astype(float)).abs()
+>           assert (corr < 0.99).all(), f"features restating same-day {col}: {corr[corr >= 0.99].round(4).to_dict()}"
+E           AssertionError: features restating same-day casual: {'casual': 1.0}
+E           assert np.False_
+E            +  where np.False_ = all()
+E            +    where all = temp                0.504360\natemp               0.504812\nhum                 0.105318\nwindspeed           0.165169\nda...         0.440896\ncnt_roll_7          0.534495\ncnt_roll_28         0.508815\ncasual              1.000000\ndtype: float64 < 0.99.all
+
+tests/test_leakage.py:45: AssertionError
 =========================== short test summary info ============================
 FAILED tests/test_contract.py::test_every_raw_column_is_classified - Assertio...
 FAILED tests/test_leakage.py::test_no_forbidden_features - AssertionError: fo...
-2 failed, 15 passed in 1.34s
+FAILED tests/test_leakage.py::test_no_feature_restates_same_day_leakage - Ass...
+3 failed, 15 passed in 1.30s
 make: *** [Makefile:16: test] Error 1
 make test exit: 2
 ```
@@ -471,26 +562,26 @@ Hook stderr:
 hook exit code: 2
 --- hook stderr ---
 Leakage tests failed after editing /home/claude/work/bikeshare-open/src/features.py:
-feats =         dteday  instant  season  ...  cnt_lag_7   cnt_roll_7  cnt_roll_28
-0   2011-01-31     31.0  WINTER  ...     141....142857  4071.321429
-671 2012-12-31    731.0  WINTER  ...      920.0  1531.428571  3969.428571
+        """test_no_forbidden_features checks names, which feature_columns()
+        already guarantees, so a leaked column renamed to something innocent
+        (`riders = casual`) passes it. This checks values: no feature may track
+        a same-day leakage column almost exactly, and the features together
+        must not reproduce cnt exactly. Legitimate features top out near 0.82
+        correlation and a max least-squares residual in the thousands."""
+        X = feats[feature_columns(feats)].astype(float)
+        for col in sorted(LEAKAGE_COLS):
+            corr = X.corrwith(feats[col].astype(float)).abs()
+>           assert (corr < 0.99).all(), f"features restating same-day {col}: {corr[corr >= 0.99].round(4).to_dict()}"
+E           AssertionError: features restating same-day casual: {'casual': 1.0}
+E           assert np.False_
+E            +  where np.False_ = all()
+E            +    where all = temp                0.504360\natemp               0.504812\nhum                 0.105318\nwindspeed           0.165169\nda...         0.440896\ncnt_roll_7          0.534495\ncnt_roll_28         0.508815\ncasual              1.000000\ndtype: float64 < 0.99.all
 
-[672 rows x 29 columns]
-
-    def test_no_forbidden_features(feats):
-        """Guards the gate, not the data: feature_columns() excludes FORBIDDEN by
-        construction, so this cannot discover a *new* leaky column. What it
-        catches is someone editing feature_columns() or FORBIDDEN -- which is
-        exactly the fault the Step 7 hook demonstrates."""
-        cols = set(feature_columns(feats))
->       assert not (cols & FORBIDDEN), f"forbidden columns in feature set: {cols & FORBIDDEN}"
-E       AssertionError: forbidden columns in feature set: {'casual'}
-E       assert not ({'atemp', 'casual', 'cnt_lag_1', 'cnt_lag_7', 'cnt_roll_28', 'cnt_roll_7', ...} & {'casual', 'cnt', 'cnt_2d_bfr', 'days_since_2011', 'holiday', 'instant', ...})
-
-tests/test_leakage.py:31: AssertionError
+tests/test_leakage.py:45: AssertionError
 =========================== short test summary info ============================
 FAILED tests/test_leakage.py::test_no_forbidden_features - AssertionError: fo...
-1 failed, 8 passed in 0.38s
+FAILED tests/test_leakage.py::test_no_feature_restates_same_day_leakage - Ass...
+2 failed, 8 passed in 0.39s
 ```
 
 ### Fault 2: `.shift(1)` removed from `cnt_roll_7`
@@ -515,7 +606,7 @@ index 156c919..35fc12f 100644
 
 ```text
 python -m pytest tests/ -q
-.........F.......                                                        [100%]
+..........F.......                                                       [100%]
 =================================== FAILURES ===================================
 _______________________ test_rolling_mean_excludes_today _______________________
 
@@ -539,10 +630,10 @@ E             comparison failed
 E             Obtained: 4605.285714285715
 E             Expected: 4724.428571428572 ± 0.00472443
 
-tests/test_leakage.py:57: AssertionError
+tests/test_leakage.py:76: AssertionError
 =========================== short test summary info ============================
 FAILED tests/test_leakage.py::test_rolling_mean_excludes_today - assert np.fl...
-1 failed, 16 passed in 1.33s
+1 failed, 17 passed in 1.31s
 make: *** [Makefile:16: test] Error 1
 make test exit: 2
 ```
@@ -569,10 +660,10 @@ E             comparison failed
 E             Obtained: 4605.285714285715
 E             Expected: 4724.428571428572 ± 0.00472443
 
-tests/test_leakage.py:57: AssertionError
+tests/test_leakage.py:76: AssertionError
 =========================== short test summary info ============================
 FAILED tests/test_leakage.py::test_rolling_mean_excludes_today - assert np.fl...
-1 failed, 8 passed in 0.39s
+1 failed, 9 passed in 0.39s
 ```
 
 ### Fault 3: `raise` removed from `encode_weather`
@@ -599,7 +690,7 @@ index 156c919..5538e32 100644
 
 ```text
 python -m pytest tests/ -q
-...........F.....                                                        [100%]
+............F.....                                                       [100%]
 =================================== FAILURES ===================================
 __________________ test_weather_encoder_rejects_unseen_labels __________________
 
@@ -611,10 +702,10 @@ __________________ test_weather_encoder_rejects_unseen_labels __________________
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 E       Failed: DID NOT RAISE ValueError
 
-tests/test_leakage.py:77: Failed
+tests/test_leakage.py:96: Failed
 =========================== short test summary info ============================
 FAILED tests/test_leakage.py::test_weather_encoder_rejects_unseen_labels - Fa...
-1 failed, 16 passed in 1.14s
+1 failed, 17 passed in 1.31s
 make: *** [Makefile:16: test] Error 1
 make test exit: 2
 ```
@@ -625,7 +716,7 @@ Hook stderr:
 hook exit code: 2
 --- hook stderr ---
 Leakage tests failed after editing /home/claude/work/bikeshare-open/src/features.py:
-......F..                                                                [100%]
+.......F..                                                               [100%]
 =================================== FAILURES ===================================
 __________________ test_weather_encoder_rejects_unseen_labels __________________
 
@@ -637,9 +728,95 @@ __________________ test_weather_encoder_rejects_unseen_labels __________________
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 E       Failed: DID NOT RAISE ValueError
 
-tests/test_leakage.py:77: Failed
+tests/test_leakage.py:96: Failed
 =========================== short test summary info ============================
 FAILED tests/test_leakage.py::test_weather_encoder_rejects_unseen_labels - Fa...
-1 failed, 8 passed in 0.35s
+1 failed, 9 passed in 0.34s
+```
+
+### Extra: a leaked column renamed to something innocent, in code
+
+`riders = casual` added in `build_features`. Before `test_no_feature_restates_same_day_leakage`
+existed, this passed all 17 tests, because `test_no_forbidden_features` only checks names.
+
+```diff
+diff --git a/src/features.py b/src/features.py
+index 156c919..4a81fb5 100644
+--- a/src/features.py
++++ b/src/features.py
+@@ -79,6 +79,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
+     # Four-week demand level, known at prediction time for date d because
+     # every input is from d-28 .. d-1. Sets LAG_WARMUP = 28.
+     out["cnt_roll_28"] = out[TARGET].shift(1).rolling(28).mean()
++    out["riders"] = out["casual"]
+ 
+     return out.dropna().reset_index(drop=True)
+ 
+```
+
+`make test`:
+
+```text
+python -m pytest tests/ -q
+.......F..........                                                       [100%]
+=================================== FAILURES ===================================
+__________________ test_no_feature_restates_same_day_leakage ___________________
+
+feats =         dteday  instant  season  ...   cnt_roll_7  cnt_roll_28 riders
+0   2011-01-31     31.0  WINTER  ...  1099.85714...2857  4071.321429  364.0
+671 2012-12-31    731.0  WINTER  ...  1531.428571  3969.428571  439.0
+
+[672 rows x 30 columns]
+
+    def test_no_feature_restates_same_day_leakage(feats):
+        """test_no_forbidden_features checks names, which feature_columns()
+        already guarantees, so a leaked column renamed to something innocent
+        (`riders = casual`) passes it. This checks values: no feature may track
+        a same-day leakage column almost exactly, and the features together
+        must not reproduce cnt exactly. Legitimate features top out near 0.82
+        correlation and a max least-squares residual in the thousands."""
+        X = feats[feature_columns(feats)].astype(float)
+        for col in sorted(LEAKAGE_COLS):
+            corr = X.corrwith(feats[col].astype(float)).abs()
+>           assert (corr < 0.99).all(), f"features restating same-day {col}: {corr[corr >= 0.99].round(4).to_dict()}"
+E           AssertionError: features restating same-day casual: {'riders': 1.0}
+E           assert np.False_
+E            +  where np.False_ = all()
+E            +    where all = temp                0.504360\natemp               0.504812\nhum                 0.105318\nwindspeed           0.165169\nda...         0.440896\ncnt_roll_7          0.534495\ncnt_roll_28         0.508815\nriders              1.000000\ndtype: float64 < 0.99.all
+
+tests/test_leakage.py:45: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_leakage.py::test_no_feature_restates_same_day_leakage - Ass...
+1 failed, 17 passed in 1.27s
+make: *** [Makefile:16: test] Error 1
+make test exit: 2
+```
+
+Hook stderr:
+
+```text
+hook exit code: 2
+--- hook stderr ---
+Leakage tests failed after editing /home/claude/work/bikeshare-open/src/features.py:
+    def test_no_feature_restates_same_day_leakage(feats):
+        """test_no_forbidden_features checks names, which feature_columns()
+        already guarantees, so a leaked column renamed to something innocent
+        (`riders = casual`) passes it. This checks values: no feature may track
+        a same-day leakage column almost exactly, and the features together
+        must not reproduce cnt exactly. Legitimate features top out near 0.82
+        correlation and a max least-squares residual in the thousands."""
+        X = feats[feature_columns(feats)].astype(float)
+        for col in sorted(LEAKAGE_COLS):
+            corr = X.corrwith(feats[col].astype(float)).abs()
+>           assert (corr < 0.99).all(), f"features restating same-day {col}: {corr[corr >= 0.99].round(4).to_dict()}"
+E           AssertionError: features restating same-day casual: {'riders': 1.0}
+E           assert np.False_
+E            +  where np.False_ = all()
+E            +    where all = temp                0.504360\natemp               0.504812\nhum                 0.105318\nwindspeed           0.165169\nda...         0.440896\ncnt_roll_7          0.534495\ncnt_roll_28         0.508815\nriders              1.000000\ndtype: float64 < 0.99.all
+
+tests/test_leakage.py:45: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_leakage.py::test_no_feature_restates_same_day_leakage - Ass...
+1 failed, 9 passed in 0.38s
 ```
 
