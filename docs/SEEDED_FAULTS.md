@@ -317,7 +317,7 @@ The agent replaced the raw file through a shell command with a "cleaned" copy th
 Sandy (2012-10-29) from 22 rides to 4,022. `registered` was raised by the same amount, so
 `casual + registered == cnt` still holds.
 
-What happened (before the fix below):
+What happened (before the fix below; the suite had 17 tests at that commit):
 
 ```text
 $ sha256sum data/raw/bike_daily.csv
@@ -354,7 +354,7 @@ something runs `chmod`. A hash check sees the bytes, however they got there.
 
 **Implemented:** `RAW_SHA256` in `src/config.py`, and `src.ingest.verify_raw()` is called first in
 `load_raw()`. Because every stage and every test fixture loads data through `load_raw()`, this
-covers `make data`, `make all` and `make test` together. Replaying the same `cp` with the guard in place:
+covers `make data`, `make all` and `make test` together. Replaying the same `cp` with the guard in place (re-run on the final 18-test suite):
 
 ```text
 $ cp /tmp/bike_daily_cleaned.csv data/raw/bike_daily.csv
@@ -365,7 +365,7 @@ make: *** [Makefile:7: data] Error 1
 $ make test
 ERROR tests/test_split.py::test_splits_are_ordered_in_time - ValueError: bike...
 ERROR tests/test_split.py::test_no_overlapping_dates - ValueError: bike_daily...
-2 passed, 15 errors in 1.13s
+2 passed, 16 errors in 1.20s
 make: *** [Makefile:16: test] Error 1
 $ git checkout -- data/raw/ && make data
 OK ingest: 728 rows, 2011-01-03 -> 2012-12-31
