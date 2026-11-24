@@ -1,6 +1,8 @@
 # Seeded faults (Exercise 2)
 
-Each fault was made in the working tree, committed, and fixed in the next commit (see `git log`).
+Faults 1-3 were each committed in their broken state and then fixed in a later commit (fault 3 has a
+new-test commit in between). Fault 4 was never committed broken: the tampered raw file was restored with
+`git checkout -- data/raw/`, and the guard that catches it landed in one commit (see `git log`).
 "`make test`" is the full output of `make test`. "Hook stderr" is the output of
 `.claude/hooks/check_leakage.sh` given the PostToolUse JSON payload Claude Code sends after an
 `Edit` of `src/features.py` (`{"tool_name":"Edit","tool_input":{"file_path":".../src/features.py"}}` on stdin,
